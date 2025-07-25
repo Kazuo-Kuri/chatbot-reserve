@@ -33,7 +33,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          KNOWLEDGE_SHEET: 'reserve_knowledge'  # ← 追加！
+          KNOWLEDGE_SHEET: 'reserve_knowledge'  # ✅ この指定が必須
         run: python scripts/generate_knowledge.py
 
       - name: 💾 knowledge.json をコミット・プッシュ
