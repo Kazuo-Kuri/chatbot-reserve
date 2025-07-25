@@ -48,3 +48,6 @@ jobs:
           git add data/faq.json data/vector_data.npy data/index.faiss
           git commit -m "📘 Auto update reserve_faq.json and FAISS index" || echo "No changes to commit"
           git push  # ✅ PATではなくGITHUB_TOKENでpush
+
+      - name: 🚀 Render に自動デプロイ
+        run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}

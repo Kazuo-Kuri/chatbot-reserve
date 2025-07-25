@@ -46,3 +46,6 @@ jobs:
           git add data/knowledge.json
           git commit -m "📘 Auto update reserve_knowledge.json" || echo "No changes to commit"
           git push  # ✅ URL指定を削除
+
+      - name: 🚀 Render に自動デプロイ
+        run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}

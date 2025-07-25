@@ -48,3 +48,6 @@ jobs:
           git add data/faq.json data/index.faiss data/vector_data.npy
           git commit -m "🤖 自動更新: reserve_faq.json & index" || echo "コミットなし"
           git push  # ✅ GITHUB_TOKENでpush
+
+      - name: 🚀 Render に自動デプロイ
+        run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
