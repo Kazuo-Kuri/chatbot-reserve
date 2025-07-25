@@ -22,10 +22,15 @@ scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/au
 credentials = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
 gc = gspread.authorize(credentials)
 
-# スプレッドシート読み込み
-spreadsheet = gc.open_by_key("1ApH-A58jUCZSKwTBAyuPZlZTNsv_2RwKGSqZNyaHHfk")
-sheet = spreadsheet.worksheet("knowledge")
+# スプレッドシートとシート名の取得
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID") or "1ApH-A58jUCZSKwTBAyuPZlZTNsv_2RwKGSqZNyaHHfk"
+KNOWLEDGE_SHEET = os.getenv("KNOWLEDGE_SHEET") or "reserve_knowledge"  # ← 環境変数が優先
 
+# スプレッドシート読み込み
+spreadsheet = gc.open_by_key(SPREADSHEET_ID)
+sheet = spreadsheet.worksheet(KNOWLEDGE_SHEET)
+
+# データ取得
 records = sheet.get_all_records()
 knowledge = {row['title']: [row['content']] for row in records}
 

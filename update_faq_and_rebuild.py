@@ -26,7 +26,7 @@ credentials = service_account.Credentials.from_service_account_info(
 
 # === スプレッドシート設定 ===
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID") or '1ApH-A58jUCZSKwTBAyuPZlZTNsv_2RwKGSqZNyaHHfk'
-RANGE_NAME = 'FAQ!A1:C'
+RANGE_NAME = os.getenv("FAQ_RANGE") or 'reserve_faq!A1:C'
 
 sheet_service = build('sheets', 'v4', credentials=credentials).spreadsheets()
 result = sheet_service.values().get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME).execute()

@@ -1,12 +1,12 @@
-name: Daily FAQ and Index Update
+name: Daily Reserve FAQ and Index Update
 
 on:
   schedule:
-    - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
+    - cron: '0 18 * * *'  # JST 03:00 に毎日実行（UTC 18:00）
   workflow_dispatch:
 
 concurrency:
-  group: update-faq-and-index
+  group: update-reserve-faq-and-index
   cancel-in-progress: true
 
 jobs:
@@ -31,17 +31,19 @@ jobs:
       - name: 🔐 credentials.json を書き出し
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: 🧠 FAQ & インデックスを自動更新
+      - name: 🧠 reserve_faq & インデックスを自動更新
         run: python update_faq_and_rebuild.py
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          FAQ_RANGE: 'reserve_faq!A1:C'   # ← ここで切り替え
 
       - name: 💾 更新されたデータをコミット・プッシュ（変更があった場合のみ）
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add data/faq.json data/vector_data.npy data/index.faiss
-          git diff --cached --quiet || git commit -m "🔄 Daily auto-update FAQ and FAISS index"
+          git diff --cached --quiet || git commit -m "🔄 Daily auto-update reserve_faq and FAISS index"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
