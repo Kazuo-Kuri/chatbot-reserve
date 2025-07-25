@@ -9,6 +9,9 @@ concurrency:
   group: update-reserve-knowledge
   cancel-in-progress: true
 
+permissions:
+  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
+
 jobs:
   update-reserve-knowledge:
     runs-on: ubuntu-22.04
@@ -42,6 +45,4 @@ jobs:
           git config user.email github-actions@github.com
           git add data/knowledge.json
           git commit -m "📘 Auto update reserve_knowledge.json" || echo "No changes to commit"
-          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }} HEAD:${{ github.ref_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git push  # ✅ URL指定を削除

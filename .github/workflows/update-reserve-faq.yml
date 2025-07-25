@@ -9,6 +9,9 @@ concurrency:
   group: update-reserve-faq
   cancel-in-progress: true
 
+permissions:
+  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
+
 jobs:
   update-reserve-faq:
     runs-on: ubuntu-22.04
@@ -36,14 +39,12 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          FAQ_RANGE: 'reserve_faq!A1:C'   # ← ここで切り替え
+          FAQ_RANGE: 'reserve_faq!A1:C'
 
       - name: 💾 更新されたデータをコミット・プッシュ
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
           git add data/faq.json data/vector_data.npy data/index.faiss
           git commit -m "📘 Auto update reserve_faq.json and FAISS index" || echo "No changes to commit"
-          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }} HEAD:${{ github.ref_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git push  # ✅ PATではなくGITHUB_TOKENでpush
