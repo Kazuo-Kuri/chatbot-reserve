@@ -65,6 +65,8 @@ search_corpus = [
     if item.get("question") and item.get("answer")
 ] + knowledge_contents + [metadata_note]
 
+search_corpus = [s for s in search_corpus if s.strip()]
+
 def get_embeddings_in_batches(texts, batch_size=100):
     vectors = []
     for i in range(0, len(texts), batch_size):
