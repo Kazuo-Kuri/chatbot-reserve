@@ -5,12 +5,12 @@ on:
     - cron: '0 18 * * 0'  # JST月曜03:00（UTC日曜18:00）
   workflow_dispatch:
 
+permissions:
+  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
+
 concurrency:
   group: update-reserve-faq
   cancel-in-progress: true
-
-permissions:
-  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
 
 jobs:
   update-reserve-faq:
@@ -34,20 +34,21 @@ jobs:
       - name: 🔐 credentials.json を書き出し
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: 🧠 reserve_faq とインデックスを更新
+      - name: 🧠 reserve_faq.json とインデックスを更新
         run: python update_faq_and_rebuild.py
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           FAQ_RANGE: 'reserve_faq!A1:C'
+          OUTPUT_PATH: 'data/reserve_faq.json'
 
-      - name: 💾 更新されたデータをコミット・プッシュ
+      - name: 💾 reserve_faq.json をコミット・プッシュ
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add data/faq.json data/vector_data.npy data/index.faiss
+          git add data/reserve_faq.json data/vector_data.npy data/index.faiss
           git commit -m "📘 Auto update reserve_faq.json and FAISS index" || echo "No changes to commit"
-          git push  # ✅ PATではなくGITHUB_TOKENでpush
+          git push
 
       - name: 🚀 Render に自動デプロイ
         run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}

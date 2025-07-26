@@ -23,8 +23,9 @@ credentials = ServiceAccountCredentials.from_json_keyfile_name('credentials.json
 gc = gspread.authorize(credentials)
 
 # スプレッドシートとシート名の取得
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID") or "1ApH-A58jUCZSKwTBAyuPZlZTNsv_2RwKGSqZNyaHHfk"
-KNOWLEDGE_SHEET = os.getenv("KNOWLEDGE_SHEET") or "knowledge"  # ✅ 共通データとして "knowledge"
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+KNOWLEDGE_SHEET = os.getenv("KNOWLEDGE_SHEET", "reserve_knowledge")
+OUTPUT_PATH = os.getenv("OUTPUT_PATH", "data/reserve_knowledge.json")
 
 # スプレッドシート読み込み
 spreadsheet = gc.open_by_key(SPREADSHEET_ID)
@@ -34,12 +35,12 @@ sheet = spreadsheet.worksheet(KNOWLEDGE_SHEET)
 records = sheet.get_all_records()
 knowledge = {row['title']: [row['content']] for row in records}
 
-# 保存先固定（共通用）
+# 保存
 os.makedirs("data", exist_ok=True)
-with open("data/knowledge.json", "w", encoding="utf-8") as f:
+with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
     json.dump(knowledge, f, ensure_ascii=False, indent=2)
 
-print("✅ data/knowledge.json を保存しました。")
+print(f"✅ {OUTPUT_PATH} を保存しました。")
 
 # ベクトル埋め込み処理
 texts = [f"{title}：{content[0]}" for title, content in knowledge.items()]
@@ -67,12 +68,12 @@ for i in range(0, len(texts), BATCH_SIZE):
 
 vector_data = np.array(all_vectors, dtype="float32")
 
-# FAISSインデックス作成・保存（共通用）
+# FAISSインデックス作成・保存（予約専用）
 dimension = vector_data.shape[1]
 index = faiss.IndexFlatL2(dimension)
 index.add(vector_data)
 
-np.save("data/vector_data.npy", vector_data)
-faiss.write_index(index, "data/index.faiss")
+np.save("data/reserve_vector_data.npy", vector_data)
+faiss.write_index(index, "data/reserve_index.faiss")
 
-print("✅ ベクトルデータとFAISSインデックスを保存しました。")
+print("✅ ベクトルデータとFAISSインデックス（予約専用）を保存しました。")

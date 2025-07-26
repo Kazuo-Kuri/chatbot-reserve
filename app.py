@@ -18,6 +18,8 @@ from openai import OpenAI
 import faiss
 import numpy as np
 from product_film_matcher import ProductFilmMatcher
+from query_expander import expand_query
+from expand_reserve_query import expand_reserve_query
 
 load_dotenv()
 
@@ -26,7 +28,6 @@ CORS(app)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# セッション履歴
 session_histories = {}
 HISTORY_TTL = 1800
 
@@ -45,7 +46,6 @@ def add_to_session_history(session_id, role, content):
     if len(history) > 10:
         history[:] = history[-10:]
 
-# FAQ & knowledge データの読み込み
 with open("data/faq.json", encoding="utf-8") as f:
     faq_items = json.load(f)
 faq_questions = [item["question"] for item in faq_items]
@@ -96,7 +96,6 @@ else:
     np.save(VECTOR_PATH, vector_data)
     faiss.write_index(index, INDEX_PATH)
 
-# Google Sheets
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 UNANSWERED_SHEET = "faq_suggestions"
 FEEDBACK_SHEET = "feedback_log"
@@ -132,7 +131,6 @@ def chat():
         if not user_q:
             return jsonify({"error": "質問がありません"}), 400
 
-        # 挨拶パターンへの即時返答
         if any(greet in user_q for greet in GREETING_PATTERNS):
             reply = "こんにちは！ご質問があればお気軽にどうぞ。"
             add_to_session_history(session_id, "assistant", reply)
@@ -145,7 +143,14 @@ def chat():
         add_to_session_history(session_id, "user", user_q)
         session_history = get_session_history(session_id)
 
-        q_vector = get_embedding(user_q)
+        # === クエリの種類に応じてリライト関数を自動選択 ===
+        lower_q = user_q.lower()
+        if any(x in lower_q for x in ["予約", "ログイン", "マニュアル", "アカウント", "登録"]):
+            expanded_q = expand_reserve_query(user_q, session_history)
+        else:
+            expanded_q = expand_query(user_q, session_history)
+
+        q_vector = get_embedding(expanded_q)
 
         D, I = index.search(np.array([q_vector]), k=7)
         if I.shape[1] == 0:
@@ -186,7 +191,7 @@ def chat():
             return jsonify({
                 "response": answer,
                 "original_question": user_q,
-                "expanded_question": user_q
+                "expanded_question": expanded_q
             })
 
         faq_part = "\n\n".join(faq_context[:3]) if faq_context else "該当するFAQは見つかりませんでした。"
@@ -236,7 +241,7 @@ def chat():
         return jsonify({
             "response": answer,
             "original_question": user_q,
-            "expanded_question": user_q
+            "expanded_question": expanded_q
         })
 
     except Exception as e:

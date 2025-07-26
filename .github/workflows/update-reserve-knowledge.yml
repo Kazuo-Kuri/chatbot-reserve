@@ -5,12 +5,12 @@ on:
     - cron: '0 3 * * *'  # JST 12:00 に毎日実行（UTC 3:00）
   workflow_dispatch:
 
+permissions:
+  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
+
 concurrency:
   group: update-reserve-knowledge
   cancel-in-progress: true
-
-permissions:
-  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
 
 jobs:
   update-reserve-knowledge:
@@ -32,20 +32,20 @@ jobs:
       - name: 🔐 credentials.json を書き出し
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: 🧠 knowledge.json を自動生成
+      - name: 🧠 reserve_knowledge.json を自動生成
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          KNOWLEDGE_SHEET: 'reserve_knowledge'  # ✅ この指定が必須
-        run: python scripts/generate_knowledge.py
+          KNOWLEDGE_SHEET: 'reserve_knowledge'
+        run: python scripts/generate_reserve_knowledge.py
 
-      - name: 💾 knowledge.json をコミット・プッシュ
+      - name: 💾 reserve_knowledge.json をコミット・プッシュ
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add data/knowledge.json
-          git commit -m "📘 Auto update reserve_knowledge.json" || echo "No changes to commit"
-          git push  # ✅ URL指定を削除
+          git add data/reserve_knowledge.json data/reserve_vector_data.npy data/reserve_index.faiss
+          git commit -m "📘 Auto update reserve_knowledge.json and vector files" || echo "No changes to commit"
+          git push
 
       - name: 🚀 Render に自動デプロイ
         run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
