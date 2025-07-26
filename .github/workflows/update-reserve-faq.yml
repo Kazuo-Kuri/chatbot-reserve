@@ -35,7 +35,7 @@ jobs:
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
       - name: 🧠 reserve_faq.json とインデックスを更新
-        run: python update_faq_and_rebuild.py
+        run: python update_reserve_faq_and_rebuild.py  # ←こちらに変更すべき！
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
