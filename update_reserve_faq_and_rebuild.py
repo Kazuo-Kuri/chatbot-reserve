@@ -59,7 +59,11 @@ if os.path.exists(metadata_path):
         metadata_note = f"【ファイル情報】{metadata.get('title', '')}（種類：{metadata.get('type', '')}、優先度：{metadata.get('priority', '')}）"
 
 EMBED_MODEL = "text-embedding-3-small"
-search_corpus = [item["question"] for item in faq_list] + knowledge_contents + [metadata_note]
+search_corpus = [
+    f"{item['question']} {item['answer']}"
+    for item in faq_list
+    if item.get("question") and item.get("answer")
+] + knowledge_contents + [metadata_note]
 
 def get_embeddings_in_batches(texts, batch_size=100):
     vectors = []
