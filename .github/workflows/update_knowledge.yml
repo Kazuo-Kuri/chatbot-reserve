@@ -5,6 +5,9 @@ on:
     - cron: '0 3 * * *'  # JST 12:00 に毎日実行
   workflow_dispatch:
 
+permissions:
+  contents: write  # ✅ GITHUB_TOKEN に push 権限を明示的に付与
+
 concurrency:
   group: update-knowledge
   cancel-in-progress: true
@@ -15,29 +18,29 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: 📦 リポジトリをチェックアウト
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: 🐍 Python をセットアップ
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: 🔧 必要なパッケージをインストール
         run: pip install gspread oauth2client numpy openai faiss-cpu python-dotenv
 
-      - name: Write credentials.json
+      - name: 🔐 credentials.json を書き出し
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: Generate knowledge.json
+      - name: 🧠 knowledge.json を生成
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python scripts/generate_knowledge.py
 
-      - name: Commit and push
+      - name: 💾 knowledge.json をコミット・プッシュ（変更があった場合のみ）
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
           git add data/knowledge.json
-          git commit -m "Auto update knowledge.json" || echo "No changes to commit"
+          git commit -m "📘 Auto update knowledge.json" || echo "No changes to commit"
           git push

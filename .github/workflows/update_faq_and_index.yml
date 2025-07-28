@@ -5,6 +5,9 @@ on:
     - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
   workflow_dispatch:
 
+permissions:
+  contents: write  # ✅ GITHUB_TOKEN に push 権限を明示的に付与
+
 concurrency:
   group: update-faq-and-index
   cancel-in-progress: true
@@ -38,10 +41,8 @@ jobs:
 
       - name: 💾 更新されたデータをコミット・プッシュ（変更があった場合のみ）
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
           git add data/faq.json data/vector_data.npy data/index.faiss
-          git diff --cached --quiet || git commit -m "🔄 Daily auto-update FAQ and FAISS index"
+          git commit -m "🔄 Daily auto-update FAQ and FAISS index" || echo "No changes to commit"
           git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
