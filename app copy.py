@@ -28,9 +28,6 @@ INDEX_PATH = "data/index.faiss"
 RESERVE_VECTOR_PATH = "data/reserve_vector_data.npy"
 RESERVE_INDEX_PATH = "data/reserve_index.faiss"
 
-# ✅ チャットログ書き出し用の定数（予約システム用）
-CHAT_LOG_SHEET = "chat_logs_reserve"
-
 load_dotenv()
 
 app = Flask(__name__)
@@ -198,24 +195,6 @@ def infer_response_mode(question):
     else:
         return "default"
 
-# ✅ ログ記録関数（ここに追加）
-def log_chat_history(user_q, answer, source_type, is_unanswered):
-    try:
-        sheet_service.values().append(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{CHAT_LOG_SHEET}!A2:E",
-            valueInputOption="RAW",
-            body={"values": [[
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                user_q.strip(),
-                answer.strip(),
-                source_type,
-                str(is_unanswered).lower()
-            ]]}
-        ).execute()
-    except Exception as e:
-        print("❌ ログ出力失敗:", e)
-
 GREETING_PATTERNS = ["こんにちは", "こんばんは", "おはよう", "はじめまして", "宜しくお願いします", "よろしくお願いします"]
 
 @app.route("/chat", methods=["POST"])
@@ -349,15 +328,6 @@ def chat():
             ).execute()
 
         add_to_session_history(session_id, "assistant", answer)
-
-        # ✅ 回答ソース・未回答判定・ログ出力をここに追加
-        if use_reserve:
-            source_type = "reserve_faq" if "Q:" in faq_part else "reserve_knowledge"
-        else:
-            source_type = "faq" if "Q:" in faq_part else "knowledge"
-
-        is_unanswered = any(phrase in answer for phrase in ["申し訳", "恐れ入りますが", "エラー"])
-        log_chat_history(user_q, answer, source_type, is_unanswered)
 
         return jsonify({
             "response": answer,
