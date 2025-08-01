@@ -173,8 +173,8 @@ else:
     faiss.write_index(index, INDEX_PATH)
 
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-UNANSWERED_SHEET = "faq_suggestions"
-FEEDBACK_SHEET = "feedback_log"
+UNANSWERED_SHEET = "faq_suggestions_reserve"
+FEEDBACK_SHEET = "feedback_log_reserve"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 credentials_info = json.loads(base64.b64decode(os.environ["GOOGLE_CREDENTIALS"]).decode("utf-8"))
