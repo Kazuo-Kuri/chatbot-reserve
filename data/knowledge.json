@@ -380,7 +380,7 @@
   "コーヒーを充填するフィルターの名称": [
     "内装、内装フック紙、フィルター、コーヒーフィルター、クリップ紙などの呼ばれ方をします。"
   ],
-  "表面単色印刷のテンプレート ディップスタイル(DipStyle)ダウンロード": [
-    " \"ディップスタイル（DipStyle）のテンプレートは、以下のリンクからダウンロードできます。【表面単色印刷テンプレート ディップスタイル（DipStyle）】](https://psi-coffee.com/faq-chat/data/print_single_dipstyle.pdf)PDF形式ですので、Adobe Illustratorなどで開いて編集可能です"
+  "表面単色印刷のテンプレート、オリジナルカラーフィルムのテンプレート、表面単色印刷のバリエーションのダウンロードURLです。": [
+    "下記リンク先よりダウンロードページにアクセスの上、ダウンロードしてください。<a href=\"https://psi-coffee.com/template/index.html\" target=\"_blank\" rel=\"noopener noreferrer\">ダウンロードページ</a> テンプレートデータはPDF形式ですが、Adobe Illustratorなどで開いて編集可能です。"
   ]
 }
