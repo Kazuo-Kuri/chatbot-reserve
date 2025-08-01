@@ -28,9 +28,6 @@ INDEX_PATH = "data/index.faiss"
 RESERVE_VECTOR_PATH = "data/reserve_vector_data.npy"
 RESERVE_INDEX_PATH = "data/reserve_index.faiss"
 
-# ✅ チャットログ書き出し用の定数（予約システム用）
-CHAT_LOG_SHEET = "chat_logs_reserve"
-
 load_dotenv()
 
 app = Flask(__name__)
@@ -197,6 +194,8 @@ def infer_response_mode(question):
         return "long"
     else:
         return "default"
+    
+CHAT_LOG_SHEET = "chat_logs_reserve"
 
 # ✅ ログ記録関数（ここに追加）
 def log_chat_history(user_q, answer, source_type, is_unanswered):
