@@ -2,7 +2,7 @@ name: Daily Reserve FAQ and Index Update
 
 on:
   schedule:
-    - cron: '0 18 * * *'  # JST 03:00 に毎日実行（UTC 18:00）
+    - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
   workflow_dispatch:
 
 concurrency:

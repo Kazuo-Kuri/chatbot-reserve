@@ -2,7 +2,7 @@ name: Update faq.json and FAISS index
 
 on:
   schedule:
-    - cron: '0 18 * * 0'  # JST月曜03:00（UTC日曜18:00）
+    - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
   workflow_dispatch:
 
 permissions:

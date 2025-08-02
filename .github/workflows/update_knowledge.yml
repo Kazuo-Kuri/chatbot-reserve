@@ -2,7 +2,7 @@ name: Update knowledge.json
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # JST 12:00 に毎日実行
+    - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
   workflow_dispatch:
 
 permissions:
