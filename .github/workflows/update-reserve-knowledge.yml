@@ -45,6 +45,7 @@ jobs:
           git config user.email github-actions@github.com
           git add data/reserve_knowledge.json data/reserve_vector_data.npy data/reserve_index.faiss
           git commit -m "📘 Auto update reserve_knowledge.json and vector files" || echo "No changes to commit"
+          git pull --rebase origin main
           git push
 
       - name: 🚀 Render に自動デプロイ
