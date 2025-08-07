@@ -47,6 +47,10 @@ jobs:
           git config --global user.email "github-actions@github.com"
           git add data/reserve_faq.json data/reserve_index.faiss data/reserve_vector_data.npy
           git commit -m "🤖 自動更新: reserve_faq.json & index" || echo "コミットなし"
+    
+          # ↓ ここでリモートの変更を取り込み（fast-forward）
+          git pull --rebase origin main
+
           git push
 
       - name: 🚀 Render に自動デプロイ
