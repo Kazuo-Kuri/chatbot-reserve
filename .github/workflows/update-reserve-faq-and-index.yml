@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write  # ✅ push のために必要
+  contents: write
 
 jobs:
   rebuild:
@@ -19,7 +19,10 @@ jobs:
 
     steps:
       - name: 📦 リポジトリをチェックアウト
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # ✅ フル履歴を取得
+          persist-credentials: true # ✅ GITHUB_TOKEN を利用して push
 
       - name: 🐍 Python をセットアップ
         uses: actions/setup-python@v4
@@ -41,17 +44,48 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           FAQ_RANGE: 'reserve_faq!A1:C'
 
-      - name: 💾 更新されたデータをコミット・プッシュ（変更があった場合のみ）
+      - name: 💾 変更がある場合のみコミット・リベース・プッシュ（リトライ付き）
+        env:
+          GIT_AUTHOR_NAME: github-actions
+          GIT_AUTHOR_EMAIL: github-actions@github.com
+          GIT_COMMITTER_NAME: github-actions
+          GIT_COMMITTER_EMAIL: github-actions@github.com
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git add data/reserve_faq.json data/reserve_index.faiss data/reserve_vector_data.npy
-          git commit -m "🤖 自動更新: reserve_faq.json & index" || echo "コミットなし"
-    
-          # ↓ ここでリモートの変更を取り込み（fast-forward）
-          git pull --rebase origin main
+          set -e
 
-          git push
+          git config user.name  "$GIT_AUTHOR_NAME"
+          git config user.email "$GIT_AUTHOR_EMAIL"
+
+          # 変更をステージング
+          git add data/reserve_faq.json data/reserve_index.faiss data/reserve_vector_data.npy || true
+
+          # 変更がなければ終了
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "🤖 自動更新: reserve_faq.json & index"
+
+          # リトライ最大3回（同時実行の競合に強くする）
+          for i in 1 2 3; do
+            echo "Rebase & push attempt #$i"
+            git fetch origin main
+            if ! git pull --rebase origin main; then
+              echo "Rebase failed. Aborting…"
+              git rebase --abort || true
+              exit 1
+            fi
+            if git push origin HEAD:main; then
+              echo "Pushed successfully."
+              exit 0
+            fi
+            echo "Push rejected. Retrying after a short sleep…"
+            sleep 3
+          done
+
+          echo "Failed to push after retries."
+          exit 1
 
       - name: 🚀 Render に自動デプロイ
         run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
