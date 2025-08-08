@@ -352,16 +352,23 @@ def chat():
             system_prompt += "\n\n詳細な説明や具体例を含めて丁寧に回答してください。"
 
         MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-5")
-        
-        completion = client.chat.completions.create(
+
+        params = dict(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2,
-            max_tokens=800
         )
+
+        # GPT-5 系は max_completion_tokens、それ以外は従来の max_tokens
+        if MODEL_NAME.startswith("gpt-5"):
+            params["max_completion_tokens"] = 800
+        else:
+            params["max_tokens"] = 800
+
+        completion = client.chat.completions.create(**params)
         answer = completion.choices[0].message.content.strip()
 
         if "申し訳" in answer or "恐れ入りますが" in answer or "エラー" in answer:
