@@ -92,6 +92,21 @@ reserve_knowledge_contents = [
 reserve_search_corpus = reserve_faq_questions + reserve_knowledge_contents
 reserve_source_flags = ["faq"] * len(reserve_faq_questions) + ["knowledge"] * len(reserve_knowledge_contents)
 
+def get_embedding(text):
+    if not text or not text.strip():
+        raise ValueError("空のテキストには埋め込みを生成できません")
+    try:
+        response = client.embeddings.create(
+            model=EMBED_MODEL,
+            input=[text]
+        )
+        if not response.data or not response.data[0].embedding:
+            raise ValueError("埋め込みデータが空です")
+        return np.array(response.data[0].embedding, dtype="float32")
+    except Exception as e:
+        print("❌ Embedding error:", e)
+        raise
+
 # ✅ 通常用 FAISS インデックスの読み込みまたは生成
 if os.path.exists(VECTOR_PATH) and os.path.exists(INDEX_PATH):
     vector_data = np.load(VECTOR_PATH)
@@ -131,23 +146,7 @@ reserve_corpus = [
     f"{item['question']} {item['answer']}" for item in reserve_faq_list
 ] + reserve_knowledge_texts
 
-reserve_index = faiss.read_index("data/reserve_index.faiss")
 # --- ここまで追加 ---
-
-def get_embedding(text):
-    if not text or not text.strip():
-        raise ValueError("空のテキストには埋め込みを生成できません")
-    try:
-        response = client.embeddings.create(
-            model=EMBED_MODEL,
-            input=[text]
-        )
-        if not response.data or not response.data[0].embedding:
-            raise ValueError("埋め込みデータが空です")
-        return np.array(response.data[0].embedding, dtype="float32")
-    except Exception as e:
-        print("❌ Embedding error:", e)
-        raise
 
 # 🔽 ここに予約用検索関数を追加
 
@@ -161,16 +160,6 @@ def search_reserve_knowledge(user_q, k=3):
 def is_reserve_query(user_q):
     keywords = ["予約", "納期", "製造日", "納品", "アクセス", "ID", "パスワード", "ログイン"]
     return any(kw in user_q for kw in keywords)
-
-if os.path.exists(VECTOR_PATH) and os.path.exists(INDEX_PATH):
-    vector_data = np.load(VECTOR_PATH)
-    index = faiss.read_index(INDEX_PATH)
-else:
-    vector_data = np.array([get_embedding(text) for text in search_corpus], dtype="float32")
-    index = faiss.IndexFlatL2(vector_data.shape[1])
-    index.add(vector_data)
-    np.save(VECTOR_PATH, vector_data)
-    faiss.write_index(index, INDEX_PATH)
 
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 UNANSWERED_SHEET = "faq_suggestions_reserve"
@@ -251,27 +240,60 @@ def chat():
         q_vector = get_embedding(expanded_q)
 
         if use_reserve:
-            D, I = reserve_index.search(np.array([q_vector]), k=7)
             search_source_flags = reserve_source_flags
             search_faq_questions = reserve_faq_questions
             search_faq_answers = reserve_faq_answers
             search_knowledge_contents = reserve_knowledge_contents
+            faiss_index = reserve_index
         else:
-            D, I = index.search(np.array([q_vector]), k=7)
             search_source_flags = source_flags
             search_faq_questions = faq_questions
             search_faq_answers = faq_answers
             search_knowledge_contents = knowledge_contents
+            faiss_index = index
 
-        D, I = index.search(np.array([q_vector]), k=7)
-        if I.shape[1] == 0:
-            raise ValueError("検索結果が見つかりませんでした")
+        k = min(7, len(search_source_flags))
+        D, I = faiss_index.search(np.array([q_vector]), k=k)
 
+        # ✅ 検索0件ガード
+        if (
+            I is None
+            or I.size == 0
+            or I.ndim < 2
+            or I.shape[1] == 0
+            or all(idx < 0 for idx in I[0])
+        ):
+            fallback = (
+                "当社はコーヒー製品の委託加工を専門とする会社です。"
+                "恐れ入りますが、ご質問内容が当社業務と直接関連のある内容かどうかをご確認のうえ、"
+                "改めてお尋ねいただけますと幸いです。\n\n"
+                "ご不明な点がございましたら、当社の【お問い合わせフォーム】よりご連絡ください。"
+            )
+            # 未回答ログ（任意）
+            try:
+                sheet_service.values().append(
+                    spreadsheetId=SPREADSHEET_ID,
+                    range=f"{UNANSWERED_SHEET}!A2:D",
+                    valueInputOption="RAW",
+                    body={"values": [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_q, "未回答(検索0件)", 1]]}
+                ).execute()
+                log_chat_history(user_q, fallback, "none", True)  # 任意
+            except Exception as e:
+                print("❌ ログ出力失敗(検索0件):", e)
+
+            add_to_session_history(session_id, "assistant", fallback)
+            return jsonify({
+                "response": fallback,
+                "original_question": user_q,
+                "expanded_question": expanded_q
+            })
+
+        # --- ここから文脈組み立て ---
         faq_context = []
         reference_context = []
 
         for idx in I[0]:
-            if idx >= len(search_source_flags):
+            if idx < 0 or idx >= len(search_source_flags):
                 continue
             src = search_source_flags[idx]
             if src == "faq":
@@ -329,13 +351,16 @@ def chat():
         elif mode == "long":
             system_prompt += "\n\n詳細な説明や具体例を含めて丁寧に回答してください。"
 
+        MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-5")
+        
         completion = client.chat.completions.create(
-            model="gpt-5",
+            model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2,
+            max_tokens=800
         )
         answer = completion.choices[0].message.content.strip()
 
