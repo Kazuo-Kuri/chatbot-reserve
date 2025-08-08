@@ -330,7 +330,7 @@ def chat():
             system_prompt += "\n\n詳細な説明や具体例を含めて丁寧に回答してください。"
 
         completion = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
