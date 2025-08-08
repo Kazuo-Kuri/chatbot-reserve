@@ -359,14 +359,17 @@ def chat():
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.2,
         )
 
-        # GPT-5 系は max_completion_tokens、それ以外は従来の max_tokens
+        # モデルごとの対応パラメータ
         if MODEL_NAME.startswith("gpt-5"):
+            # GPT-5系は temperature非対応（固定）。指定しない or 1 にする
             params["max_completion_tokens"] = 800
+            # （付けるなら）params["temperature"] = 1
         else:
+            # 旧モデルは従来通り
             params["max_tokens"] = 800
+            params["temperature"] = 0.2
 
         completion = client.chat.completions.create(**params)
         answer = completion.choices[0].message.content.strip()
