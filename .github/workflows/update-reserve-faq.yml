@@ -19,7 +19,9 @@ jobs:
 
     steps:
       - name: 🧾 リポジトリをチェックアウト
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # ← rebase/pull のため履歴を取得
 
       - name: 🐍 Python をセットアップ
         uses: actions/setup-python@v4
@@ -35,20 +37,32 @@ jobs:
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
       - name: 🧠 reserve_faq.json とインデックスを更新
-        run: python update_reserve_faq_and_rebuild.py  # ←こちらに変更すべき！
+        run: python update_reserve_faq_and_rebuild.py
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           FAQ_RANGE: 'reserve_faq!A1:C'
           OUTPUT_PATH: 'data/reserve_faq.json'
 
-      - name: 💾 reserve_faq.json をコミット・プッシュ
+      - name: 💾 Commit & Push (rebase against origin/main)
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add data/reserve_faq.json data/vector_data.npy data/index.faiss
-          git commit -m "📘 Auto update reserve_faq.json and FAISS index" || echo "No changes to commit"
-          git push
+
+          # リモートの最新を取り込み（競合しにくいよう rebase）
+          git fetch origin main
+          git pull --rebase origin main
+
+          # ✅ ファイルパスを reserve_* に合わせる
+          git add data/reserve_faq.json data/reserve_vector_data.npy data/reserve_index.faiss
+
+          # 変更がなければコミット/プッシュをスキップ
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📘 Auto update reserve_faq.json and FAISS index"
+            git push origin HEAD:main
+          fi
 
       - name: 🚀 Render に自動デプロイ
         run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
