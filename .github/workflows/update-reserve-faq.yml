@@ -1,19 +1,17 @@
-name: Update reserve_faq.json and FAISS index
+name: Manual Update reserve_faq.json and FAISS
 
 on:
-  schedule:
-    - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
-  workflow_dispatch:
+  workflow_dispatch: {}  # 手動実行のみ
 
 permissions:
-  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
+  contents: write
 
 concurrency:
-  group: update-reserve-faq
+  group: update-reserve-faq-manual
   cancel-in-progress: true
 
 jobs:
-  update-reserve-faq:
+  update-reserve-faq-manual:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
 
@@ -21,14 +19,22 @@ jobs:
       - name: 🧾 リポジトリをチェックアウト
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # ← rebase/pull のため履歴を取得
+          fetch-depth: 0
+          ref: main
+
+      - name: 🧹 生成前に必ずクリーン化（衝突防止）
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git clean -fdx
 
       - name: 🐍 Python をセットアップ
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: 🔧 必要なパッケージをインストール
+      - name: 🔧 依存パッケージをインストール
         run: |
           pip install -r requirements.txt
           pip install faiss-cpu python-dotenv
@@ -44,25 +50,23 @@ jobs:
           FAQ_RANGE: 'reserve_faq!A1:C'
           OUTPUT_PATH: 'data/reserve_faq.json'
 
-      - name: 💾 Commit & Push (rebase against origin/main)
+      - name: 💾 変更がある場合のみコミット＆プッシュ（pull/rebase しない）
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
-          # リモートの最新を取り込み（競合しにくいよう rebase）
-          git fetch origin main
-          git pull --rebase origin main
-
-          # ✅ ファイルパスを reserve_* に合わせる
+          # 生成物をステージ
           git add data/reserve_faq.json data/reserve_vector_data.npy data/reserve_index.faiss
 
-          # 変更がなければコミット/プッシュをスキップ
+          # 変更がなければ終了
           if git diff --cached --quiet; then
             echo "No changes to commit"
-          else
-            git commit -m "📘 Auto update reserve_faq.json and FAISS index"
-            git push origin HEAD:main
+            exit 0
           fi
 
+          git commit -m "📘 Manual update: reserve_faq.json & FAISS"
+          git push origin HEAD:main
+
       - name: 🚀 Render に自動デプロイ
+        if: success()
         run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
