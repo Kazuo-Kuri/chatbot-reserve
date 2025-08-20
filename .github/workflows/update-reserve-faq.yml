@@ -1,14 +1,17 @@
-name: Manual Update reserve_faq.json and FAISS
+name: Update reserve_faq.json and FAISS
 
 on:
-  workflow_dispatch: {}  # 手動実行のみ
+  schedule:
+    - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
+  workflow_dispatch: {}  # 手動実行も可能にする
 
 permissions:
   contents: write
 
 concurrency:
-  group: update-reserve-faq-manual
+  group: update-reserve-faq
   cancel-in-progress: true
+
 
 jobs:
   update-reserve-faq-manual:
@@ -64,7 +67,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "📘 Manual update: reserve_faq.json & FAISS"
+          git commit -m "📘 Update: reserve_faq.json & FAISS"
           git push origin HEAD:main
 
       - name: 🚀 Render に自動デプロイ
