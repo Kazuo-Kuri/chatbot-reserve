@@ -12,7 +12,6 @@ concurrency:
   group: update-reserve-faq
   cancel-in-progress: true
 
-
 jobs:
   update-reserve-faq-manual:
     runs-on: ubuntu-22.04
@@ -53,9 +52,9 @@ jobs:
           FAQ_RANGE: 'reserve_faq!A1:C'
           OUTPUT_PATH: 'data/reserve_faq.json'
 
-      - name: 💾 変更がある場合のみコミット＆プッシュ（pull/rebase しない）
+      - name: 💾 変更がある場合のみコミット＆リベースしてプッシュ
         run: |
-          git config --global user.name "github-actions"
+          git config --global user.name  "github-actions"
           git config --global user.email "github-actions@github.com"
 
           # 生成物をステージ
@@ -67,7 +66,12 @@ jobs:
             exit 0
           fi
 
-          git commit -m "📘 Update: reserve_faq.json & FAISS"
+          # コミット（ループ防止のため [skip ci] を付与）
+          git commit -m "📘 Update: reserve_faq.json & FAISS [skip ci]"
+
+          # リモート最新へリベースしてからプッシュ（今回のエラー対策の本質）
+          git fetch origin
+          git pull --rebase origin main
           git push origin HEAD:main
 
       - name: 🚀 Render に自動デプロイ
