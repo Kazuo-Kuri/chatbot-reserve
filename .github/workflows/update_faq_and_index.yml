@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # ✅ GITHUB_TOKEN に push 権限を明示的に付与
+  contents: write  # ✅ GITHUB_TOKEN に push 権限
 
 concurrency:
   group: update-faq-and-index
@@ -19,7 +19,10 @@ jobs:
 
     steps:
       - name: 📦 リポジトリをチェックアウト
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # rebaseのためにフル履歴
+          ref: main
 
       - name: 🐍 Python をセットアップ
         uses: actions/setup-python@v4
@@ -39,10 +42,50 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: 💾 更新されたデータをコミット・プッシュ（変更があった場合のみ）
+      - name: 🧹 セキュリティ上の後始末（credentials.json 削除）
+        if: always()
+        run: rm -f credentials.json
+
+      - name: 🧑‍💻 Git ユーザー設定
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
+          git config fetch.prune true
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: 💾 更新をコミット & リベースしてプッシュ（変更があった場合のみ・自動リトライ）
+        run: |
+          # 対象ファイルに変更がなければ終了
+          if git diff --quiet -- data/faq.json data/vector_data.npy data/index.faiss; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
           git add data/faq.json data/vector_data.npy data/index.faiss
-          git commit -m "🔄 Daily auto-update FAQ and FAISS index" || echo "No changes to commit"
-          git push
+          git commit -m "🔄 Daily auto-update FAQ and FAISS index"
+
+          # リモート更新を取り込みつつ最大3回リトライ
+          for i in 1 2 3; do
+            echo "Attempt $i: fetch & rebase onto origin/main..."
+            git fetch origin main
+            if git rebase origin/main; then
+              echo "Rebase succeeded. Pushing..."
+              if git push origin HEAD:main; then
+                echo "Push success."
+                exit 0
+              fi
+            else
+              echo "Rebase conflicted. Aborting and soft-resetting onto origin/main..."
+              git rebase --abort || true
+              git reset --mixed origin/main
+              # 直前のコミットを作り直す（作業ツリーは保持）
+              git add -A
+              git commit -m "🔄 Daily auto-update FAQ and FAISS index (rebased)"
+            fi
+            echo "Push attempt $i failed. Retrying in $((i*5))s..."
+            sleep $((i*5))
+          done
+
+          echo "Push failed after retries."
+          exit 1
