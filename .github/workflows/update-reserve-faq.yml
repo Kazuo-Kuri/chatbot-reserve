@@ -3,7 +3,7 @@ name: Update reserve_faq.json and FAISS
 on:
   schedule:
     - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
-  workflow_dispatch: {}  # 手動実行も可能にする
+  workflow_dispatch: {}    # 手動実行も可能にする
 
 permissions:
   contents: write
@@ -44,19 +44,38 @@ jobs:
       - name: 🔐 credentials.json を書き出し
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
 
-      - name: 🧠 reserve_faq.json とインデックスを更新
-        run: python update_reserve_faq_and_rebuild.py
+      - name: 🧠 reserve_faq.json とインデックスを更新（3回リトライ）
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           FAQ_RANGE: 'reserve_faq!A1:C'
           OUTPUT_PATH: 'data/reserve_faq.json'
-
-      - name: 💾 変更がある場合のみコミット＆リベースしてプッシュ
         run: |
-          git config --global user.name  "github-actions"
-          git config --global user.email "github-actions@github.com"
+          for i in 1 2 3; do
+            echo "Attempt $i: python update_reserve_faq_and_rebuild.py"
+            if python update_reserve_faq_and_rebuild.py; then
+              echo "OK"; exit 0
+            fi
+            echo "Attempt $i failed. Sleeping $((i*20))s..."
+            sleep $((i*20))
+          done
+          echo "All attempts failed."
+          exit 1
 
+      - name: 🧹 後始末（credentials.json 削除）
+        if: always()
+        run: rm -f credentials.json
+
+      - name: 🧑‍💻 Git ユーザー設定
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
+          git config fetch.prune true
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: 💾 変更がある場合のみコミット
+        run: |
           # 生成物をステージ
           git add data/reserve_faq.json data/reserve_vector_data.npy data/reserve_index.faiss
 
@@ -66,13 +85,55 @@ jobs:
             exit 0
           fi
 
-          # コミット（ループ防止のため [skip ci] を付与）
+          # コミット（CI ループ防止のため [skip ci] を付与）
           git commit -m "📘 Update: reserve_faq.json & FAISS [skip ci]"
 
-          # リモート最新へリベースしてからプッシュ（今回のエラー対策の本質）
-          git fetch origin
-          git pull --rebase origin main
-          git push origin HEAD:main
+      - name: ⬆️ リベースしてプッシュ（バイナリ競合は ours で自動解決・リトライ）
+        run: |
+          set -e
+          for i in 1 2 3; do
+            echo "Attempt $i: fetch & rebase onto origin/main..."
+            git fetch origin main
+
+            if git rebase origin/main; then
+              echo "Rebase succeeded."
+            else
+              echo "Rebase hit conflicts. Resolving generated binaries with ours..."
+              CONFLICTS=$(git diff --name-only --diff-filter=U || true)
+              echo "Conflicts: $CONFLICTS"
+
+              # 生成物のみ ours を採用（必要に応じて追加）
+              for f in data/reserve_index.faiss data/reserve_vector_data.npy data/reserve_faq.json; do
+                if echo "$CONFLICTS" | grep -q "^$f$"; then
+                  git checkout --ours -- "$f"
+                  git add "$f"
+                fi
+              done
+
+              # 未解決が残っていれば安全にやり直し
+              if git diff --name-only --diff-filter=U | grep .; then
+                echo "Unresolved conflicts remain. Aborting rebase and recreating commit on top of origin/main."
+                git rebase --abort || true
+                git reset --mixed origin/main
+                git add data/reserve_faq.json data/reserve_vector_data.npy data/reserve_index.faiss
+                git commit -m "📘 Update: reserve_faq.json & FAISS (rebased ours) [skip ci]"
+              else
+                git rebase --continue || true
+              fi
+            fi
+
+            echo "Pushing..."
+            if git push origin HEAD:main; then
+              echo "Push success."
+              exit 0
+            fi
+
+            echo "Push attempt $i failed. Retrying in $((i*5))s..."
+            sleep $((i*5))
+          done
+
+          echo "Push failed after retries."
+          exit 1
 
       - name: 🚀 Render に自動デプロイ
         if: success()
