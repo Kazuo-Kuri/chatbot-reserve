@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # ✅ GITHUB_TOKEN に push 権限を付与
+  contents: write
 
 concurrency:
   group: update-reserve-knowledge
@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: 📦 リポジトリをチェックアウト
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: 🐍 Python をセットアップ
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
@@ -39,14 +39,28 @@ jobs:
           KNOWLEDGE_SHEET: 'reserve_knowledge'
         run: python scripts/generate_reserve_knowledge.py
 
+      - name: 🧹 後始末（credentials.json 削除）
+        if: always()
+        run: rm -f credentials.json
+
       - name: 💾 reserve_knowledge.json をコミット・プッシュ
+        id: commit_push
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
           git add data/reserve_knowledge.json data/reserve_vector_data.npy data/reserve_index.faiss
-          git commit -m "📘 Auto update reserve_knowledge.json and vector files" || echo "No changes to commit"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "📘 Auto update reserve_knowledge.json and vector files"
           git pull --rebase origin main
           git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: 🚀 Render に自動デプロイ
+        if: steps.commit_push.outputs.changed == 'true'
         run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}

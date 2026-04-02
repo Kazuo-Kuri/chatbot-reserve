@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: 🧾 リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: main
@@ -32,7 +32,7 @@ jobs:
           git clean -fdx
 
       - name: 🐍 Python をセットアップ
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
@@ -51,16 +51,22 @@ jobs:
           FAQ_RANGE: 'reserve_faq!A1:C'
           OUTPUT_PATH: 'data/reserve_faq.json'
         run: |
+          success=0
           for i in 1 2 3; do
             echo "Attempt $i: python update_reserve_faq_and_rebuild.py"
             if python update_reserve_faq_and_rebuild.py; then
-              echo "OK"; exit 0
+              echo "OK"
+              success=1
+              break
             fi
             echo "Attempt $i failed. Sleeping $((i*20))s..."
             sleep $((i*20))
           done
-          echo "All attempts failed."
-          exit 1
+
+          if [ "$success" -ne 1 ]; then
+            echo "All attempts failed."
+            exit 1
+          fi
 
       - name: 🧹 後始末（credentials.json 削除）
         if: always()
