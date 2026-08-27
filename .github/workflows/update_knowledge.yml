@@ -2,15 +2,15 @@ name: Update knowledge.json
 
 on:
   schedule:
-    - cron: '0 18 * * *'  # 毎日03:00 JST（UTC 18:00）
+    - cron: '10 18 * * *'  # 毎日03:10 JST（UTC 18:10）
   workflow_dispatch:
 
 permissions:
-  contents: write  # ✅ GITHUB_TOKEN に push 権限を明示
+  contents: write
 
 concurrency:
-  group: update-knowledge
-  cancel-in-progress: true
+  group: chatbot-data-update
+  cancel-in-progress: false
 
 jobs:
   update-knowledge:
@@ -23,75 +23,64 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
+          persist-credentials: true
 
       - name: 🐍 Python をセットアップ
         uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: 🔧 必要なパッケージをインストール
-        run: |
-          pip install gspread oauth2client numpy openai faiss-cpu python-dotenv
+        run: pip install gspread oauth2client numpy openai faiss-cpu python-dotenv
 
       - name: 🔐 credentials.json を書き出し
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
-
-      - name: 🧠 knowledge.json を生成（3回リトライ）
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          for i in 1 2 3; do
-            echo "Attempt $i: python scripts/generate_knowledge.py"
-            if python scripts/generate_knowledge.py; then
-              echo "OK"; exit 0
-            fi
-            echo "Attempt $i failed. Sleeping $((i*20))s..."
-            sleep $((i*20))
-          done
-          echo "All attempts failed."
-          exit 1
-
-      - name: 🧹 後始末（credentials.json 削除）
-        if: always()
-        run: rm -f credentials.json
 
       - name: 🧑‍💻 Git ユーザー設定
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config pull.rebase true
           git config fetch.prune true
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: 💾 変更の有無を確認してコミット
-        run: |
-          if git diff --quiet -- data/knowledge.json; then
-            echo "No changes to commit."
-            exit 0
-          fi
-          git add data/knowledge.json
-          git commit -m "📘 Auto update knowledge.json"
-
-      - name: ⬆️ リベースしてプッシュ（自動リトライ）
+      - name: 🧠 最新mainからknowledge.jsonを生成・コミット・プッシュ
+        id: update
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           for i in 1 2 3; do
-            echo "Attempt $i: fetch & rebase onto origin/main..."
+            echo "Attempt $i: sync with origin/main and regenerate knowledge.json..."
             git fetch origin main
-            if git rebase origin/main; then
-              echo "Rebase succeeded. Pushing..."
-              if git push origin HEAD:main; then
-                echo "Push success."
-                exit 0
-              fi
-            else
-              echo "Rebase conflicted. Aborting and soft-resetting onto origin/main..."
-              git rebase --abort || true
-              git reset --mixed origin/main
-              git add -A
-              git commit -m "📘 Auto update knowledge.json (rebased)"
+            git reset --hard origin/main
+
+            if ! python scripts/generate_knowledge.py; then
+              echo "Generation attempt $i failed."
+              sleep $((i*20))
+              continue
             fi
-            echo "Push attempt $i failed. Retrying in $((i*5))s..."
+
+            if git diff --quiet -- data/knowledge.json; then
+              echo "No changes to commit."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            git add data/knowledge.json
+            git commit -m "📘 Auto update knowledge.json"
+
+            if git push origin HEAD:main; then
+              echo "Push success."
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "Push attempt $i was rejected. Regenerating from the latest main."
             sleep $((i*5))
           done
-          echo "Push failed after retries."
+
+          echo "Update failed after three attempts."
           exit 1
+
+      - name: 🧹 後始末（credentials.json 削除）
+        if: always()
+        run: rm -f credentials.json

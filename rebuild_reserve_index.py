@@ -1,59 +1,84 @@
-import os
 import json
-import numpy as np
+import os
+
 import faiss
+import numpy as np
 import openai
-from dotenv import load_dotenv
 
-# === 初期設定 ===
-load_dotenv()
+if os.getenv("GITHUB_ACTIONS") != "true":
+    from dotenv import load_dotenv
+    load_dotenv()
+
 openai.api_key = os.getenv("OPENAI_API_KEY")
+if not openai.api_key:
+    raise ValueError("OPENAI_API_KEY is not set or empty.")
 
-# === パス設定（予約用） ===
 FAQ_PATH = "data/reserve_faq.json"
 KNOWLEDGE_PATH = "data/reserve_knowledge.json"
+METADATA_PATH = "data/reserve_metadata.json"
 VECTOR_PATH = "data/reserve_vector_data.npy"
 INDEX_PATH = "data/reserve_index.faiss"
 EMBED_MODEL = "text-embedding-3-small"
 
-# === Embedding取得関数 ===
-def get_embedding(text):
-    response = openai.embeddings.create(
-        model=EMBED_MODEL,
-        input=text
-    )
-    return np.array(response.data[0].embedding, dtype="float32")
 
-# === データ読み込み ===
+def get_embeddings_in_batches(texts, batch_size=100):
+    vectors = []
+    for i in range(0, len(texts), batch_size):
+        response = openai.embeddings.create(
+            model=EMBED_MODEL,
+            input=texts[i:i + batch_size],
+        )
+        vectors.extend(
+            np.array(item.embedding, dtype="float32")
+            for item in response.data
+        )
+    return np.array(vectors, dtype="float32")
+
+
 with open(FAQ_PATH, "r", encoding="utf-8") as f:
     faq_items = json.load(f)
-faq_questions = [item["question"] for item in faq_items]
 
 with open(KNOWLEDGE_PATH, "r", encoding="utf-8") as f:
-    knowledge_data = json.load(f)
+    knowledge_dict = json.load(f)
 
-# reserve_knowledge.json は list 構造（title, content）を想定
-if isinstance(knowledge_data, list):
-    knowledge_contents = [
-        f"{item['title']}：{item['content']}" for item in knowledge_data
-    ]
-else:
-    raise ValueError("reserve_knowledge.json の形式が不正です。")
+if not isinstance(faq_items, list):
+    raise ValueError("reserve_faq.json must contain a list.")
+if not isinstance(knowledge_dict, dict):
+    raise ValueError("reserve_knowledge.json must contain an object.")
 
-# === コーパス構築 ===
-search_corpus = faq_questions + knowledge_contents
+faq_contents = [
+    f"{item['question']} {item['answer']}"
+    for item in faq_items
+    if item.get("question") and item.get("answer")
+]
+knowledge_contents = [
+    f"{category}：{text}"
+    for category, texts in knowledge_dict.items()
+    for text in texts
+]
 
-# === ベクトル生成 & インデックス構築 ===
-print("🔄 予約用ベクトル生成中...")
-vector_data = np.array([get_embedding(text) for text in search_corpus], dtype="float32")
+search_corpus = faq_contents + knowledge_contents
+if os.path.exists(METADATA_PATH):
+    with open(METADATA_PATH, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    metadata_note = (
+        f"【ファイル情報】{metadata.get('title', '')}"
+        f"（種類：{metadata.get('type', '')}、優先度：{metadata.get('priority', '')}）"
+    )
+    if metadata_note.strip():
+        search_corpus.append(metadata_note)
 
-print("🧠 FAISSインデックス作成...")
+search_corpus = [text for text in search_corpus if text.strip()]
+if not search_corpus:
+    raise ValueError("No reserve FAQ or Knowledge content is available to index.")
+
+print("🔄 reserve FAQとKnowledgeのベクトルをバッチで再生成しています...")
+vector_data = get_embeddings_in_batches(search_corpus)
+
 index = faiss.IndexFlatL2(vector_data.shape[1])
 index.add(vector_data)
 
-# === 保存 ===
-print("💾 ファイル保存中...")
 np.save(VECTOR_PATH, vector_data)
 faiss.write_index(index, INDEX_PATH)
 
-print("✅ 予約用インデックスの再構築が完了しました。")
+print("✅ 予約用ベクトルデータとFAISSインデックスを保存しました。")
