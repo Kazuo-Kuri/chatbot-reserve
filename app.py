@@ -4,6 +4,7 @@ import json
 import time
 import base64
 import ipaddress
+import threading
 import traceback
 from datetime import datetime
 from dotenv import load_dotenv
@@ -205,6 +206,8 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 credentials_info = json.loads(base64.b64decode(os.environ["GOOGLE_CREDENTIALS"]).decode("utf-8"))
 credentials = service_account.Credentials.from_service_account_info(credentials_info, scopes=SCOPES)
 sheet_service = build("sheets", "v4", credentials=credentials).spreadsheets()
+sheet_id_cache = {}
+sheet_write_lock = threading.Lock()
 
 pf_matcher = ProductFilmMatcher("data/product_film_color_matrix.json")
 
@@ -222,21 +225,81 @@ def infer_response_mode(question):
     
 CHAT_LOG_SHEET = "chat_logs_reserve"
 
+
+def insert_log_row(sheet_name, values):
+    with sheet_write_lock:
+        sheet_id = sheet_id_cache.get(sheet_name)
+        if sheet_id is None:
+            spreadsheet = sheet_service.get(
+                spreadsheetId=SPREADSHEET_ID,
+                fields="sheets.properties(sheetId,title)",
+            ).execute()
+            sheet_id = next(
+                (
+                    sheet["properties"]["sheetId"]
+                    for sheet in spreadsheet.get("sheets", [])
+                    if sheet.get("properties", {}).get("title") == sheet_name
+                ),
+                None,
+            )
+            if sheet_id is None:
+                raise ValueError(f"Sheet not found: {sheet_name}")
+            sheet_id_cache[sheet_name] = sheet_id
+
+        cell_values = []
+        for value in values:
+            if isinstance(value, bool):
+                user_entered_value = {"boolValue": value}
+            elif isinstance(value, (int, float)):
+                user_entered_value = {"numberValue": value}
+            else:
+                user_entered_value = {"stringValue": str(value)}
+            cell_values.append({"userEnteredValue": user_entered_value})
+
+        sheet_service.batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={
+                "requests": [
+                    {
+                        "insertDimension": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "dimension": "ROWS",
+                                "startIndex": 1,
+                                "endIndex": 2,
+                            },
+                            "inheritFromBefore": False,
+                        }
+                    },
+                    {
+                        "updateCells": {
+                            "start": {
+                                "sheetId": sheet_id,
+                                "rowIndex": 1,
+                                "columnIndex": 0,
+                            },
+                            "rows": [{"values": cell_values}],
+                            "fields": "userEnteredValue",
+                        }
+                    },
+                ]
+            },
+        ).execute()
+
+
 # ✅ ログ記録関数（ここに追加）
 def log_chat_history(user_q, answer, source_type, is_unanswered):
     try:
-        sheet_service.values().append(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{CHAT_LOG_SHEET}!A2:E",
-            valueInputOption="RAW",
-            body={"values": [[
+        insert_log_row(
+            CHAT_LOG_SHEET,
+            [
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 user_q.strip(),
                 answer.strip(),
                 source_type,
                 str(is_unanswered).lower()
-            ]]}
-        ).execute()
+            ],
+        )
     except Exception as e:
         print("❌ ログ出力失敗:", e)
 
@@ -404,12 +467,10 @@ def chat():
 
         if "申し訳" in answer or "恐れ入りますが" in answer or "エラー" in answer:
             try:
-                sheet_service.values().append(
-                    spreadsheetId=SPREADSHEET_ID,
-                    range=f"{UNANSWERED_SHEET}!A2:D",
-                    valueInputOption="RAW",
-                    body={"values": [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_q, "未回答", 1]]}
-                ).execute()
+                insert_log_row(
+                    UNANSWERED_SHEET,
+                    [datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_q, "未回答", 1],
+                )
             except Exception:
                 print("[ERROR writing unanswered log]")
                 traceback.print_exc()
@@ -467,12 +528,10 @@ def feedback():
         return jsonify({"error": "フィードバックの入力文字数が上限を超えています。"}), 400
 
     try:
-        sheet_service.values().append(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{FEEDBACK_SHEET}!A2:E",
-            valueInputOption="RAW",
-            body={"values": [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), question, answer, feedback_value, reason]]}
-        ).execute()
+        insert_log_row(
+            FEEDBACK_SHEET,
+            [datetime.now().strftime("%Y-%m-%d %H:%M:%S"), question, answer, feedback_value, reason],
+        )
     except Exception:
         print("[ERROR writing feedback]")
         traceback.print_exc()

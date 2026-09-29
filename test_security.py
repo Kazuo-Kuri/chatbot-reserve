@@ -36,7 +36,15 @@ class SecurityTests(unittest.TestCase):
         module = self.module
         module.limiter.reset()
         module.session_histories.clear()
+        module.sheet_id_cache.clear()
         module.sheet_service = Mock()
+        module.sheet_service.get.return_value.execute.return_value = {
+            "sheets": [
+                {"properties": {"sheetId": 1, "title": module.UNANSWERED_SHEET}},
+                {"properties": {"sheetId": 2, "title": module.FEEDBACK_SHEET}},
+                {"properties": {"sheetId": 3, "title": module.CHAT_LOG_SHEET}},
+            ]
+        }
         module.expand_query = Mock(side_effect=lambda question, _history: question)
         module.expand_reserve_query = Mock(side_effect=lambda question, _history: question)
         module.get_embedding = Mock(return_value=np.zeros(1536, dtype="float32"))
@@ -144,12 +152,20 @@ class SecurityTests(unittest.TestCase):
         self.module.client.chat.completions.create.return_value = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="申し訳ありませんが回答します"))]
         )
-        self.module.sheet_service.values.return_value.append.return_value.execute.side_effect = RuntimeError(
+        self.module.sheet_service.batchUpdate.return_value.execute.side_effect = RuntimeError(
             "mock sheets failure"
         )
         response = self.post_chat()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["response"], "申し訳ありませんが回答します")
+
+    def test_feedback_sheets_failure_returns_fixed_503(self):
+        self.module.sheet_service.batchUpdate.return_value.execute.side_effect = RuntimeError(
+            "sensitive Sheets detail"
+        )
+        response = self.client.post("/feedback", json=self.valid_feedback())
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("sensitive Sheets detail", response.get_data(as_text=True))
 
     def test_invalid_feedback_is_rejected(self):
         response = self.client.post("/feedback", json={"question": "質問", "feedback": "useful"})
