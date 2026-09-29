@@ -44,7 +44,7 @@ def expand_reserve_query(user_input, session_history):
             max_tokens=100,
         )
 
-        return response.choices[0].message.content.strip()
+        return (response.choices[0].message.content or "").strip() or user_input
 
     except Exception as e:
         print("❌ expand_reserve_query error:", e)

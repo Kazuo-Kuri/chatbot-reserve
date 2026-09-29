@@ -53,6 +53,21 @@ def add_to_session_history(session_id, role, content):
     if len(history) > 10:
         history[:] = history[-10:]
 
+def get_embedding(text):
+    if not text or not text.strip():
+        raise ValueError("空のテキストには埋め込みを生成できません")
+    try:
+        response = client.embeddings.create(
+            model=EMBED_MODEL,
+            input=[text]
+        )
+        if not response.data or not response.data[0].embedding:
+            raise ValueError("埋め込みデータが空です")
+        return np.array(response.data[0].embedding, dtype="float32")
+    except Exception as e:
+        print("❌ Embedding error:", e)
+        raise
+
 # 通常用
 with open("data/faq.json", encoding="utf-8") as f:
     faq_items = json.load(f)
@@ -72,12 +87,17 @@ if os.path.exists(metadata_path):
         metadata = json.load(f)
         metadata_note = f"{metadata.get('title', '')} (種類: {metadata.get('type', '')}, 優先度: {metadata.get('priority', '')})"
 
-search_corpus = faq_questions + knowledge_contents
-source_flags = ["faq"] * len(faq_questions) + ["knowledge"] * len(knowledge_contents)
+# 通常用生成スクリプトは末尾にメタ情報を1件追加する（検索後は従来通り別途追加）。
+index_metadata_note = ""
+if metadata_note:
+    index_metadata_note = f"【ファイル情報】{metadata.get('title', '')}（種類：{metadata.get('type', '')}、優先度：{metadata.get('priority', '')}）"
+search_corpus = faq_questions + knowledge_contents + [index_metadata_note]
+source_flags = ["faq"] * len(faq_questions) + ["knowledge"] * len(knowledge_contents) + ["metadata"]
 
 # ✅ 予約システム用 FAQ の読み込み
 with open("data/reserve_faq.json", encoding="utf-8") as f:
     reserve_faq_items = json.load(f)
+reserve_faq_items = [item for item in reserve_faq_items if item.get("question") and item.get("answer")]
 reserve_faq_questions = [item["question"] for item in reserve_faq_items]
 reserve_faq_answers = [item["answer"] for item in reserve_faq_items]
 
@@ -89,8 +109,18 @@ reserve_knowledge_contents = [
 ]
 
 # ✅ 予約システム用 検索対象とフラグ
-reserve_search_corpus = reserve_faq_questions + reserve_knowledge_contents
+reserve_search_corpus = [f"{q} {a}" for q, a in zip(reserve_faq_questions, reserve_faq_answers)] + reserve_knowledge_contents
 reserve_source_flags = ["faq"] * len(reserve_faq_questions) + ["knowledge"] * len(reserve_knowledge_contents)
+
+# rebuild_reserve_index.py と同じ任意の末尾メタ情報。
+if os.path.exists("data/reserve_metadata.json"):
+    with open("data/reserve_metadata.json", encoding="utf-8") as f:
+        reserve_metadata = json.load(f)
+    reserve_search_corpus.append(
+        f"【ファイル情報】{reserve_metadata.get('title', '')}"
+        f"（種類：{reserve_metadata.get('type', '')}、優先度：{reserve_metadata.get('priority', '')}）"
+    )
+    reserve_source_flags.append("metadata")
 
 # ✅ 通常用 FAISS インデックスの読み込みまたは生成
 if os.path.exists(VECTOR_PATH) and os.path.exists(INDEX_PATH):
@@ -114,63 +144,20 @@ else:
     np.save(RESERVE_VECTOR_PATH, reserve_vector_data)
     faiss.write_index(reserve_index, RESERVE_INDEX_PATH)
 
-# --- 予約専用データの読み込み ---
-with open("data/reserve_faq.json", "r", encoding="utf-8") as f:
-    reserve_faq_list = json.load(f)
-
-with open("data/reserve_knowledge.json", "r", encoding="utf-8") as f:
-    reserve_knowledge_dict = json.load(f)
-
-reserve_knowledge_texts = [
-    f"{category}：{text}"
-    for category, texts in reserve_knowledge_dict.items()
-    for text in texts
-]
-
-reserve_corpus = [
-    f"{item['question']} {item['answer']}" for item in reserve_faq_list
-] + reserve_knowledge_texts
-
-reserve_index = faiss.read_index("data/reserve_index.faiss")
-# --- ここまで追加 ---
-
-def get_embedding(text):
-    if not text or not text.strip():
-        raise ValueError("空のテキストには埋め込みを生成できません")
-    try:
-        response = client.embeddings.create(
-            model=EMBED_MODEL,
-            input=[text]
-        )
-        if not response.data or not response.data[0].embedding:
-            raise ValueError("埋め込みデータが空です")
-        return np.array(response.data[0].embedding, dtype="float32")
-    except Exception as e:
-        print("❌ Embedding error:", e)
-        raise
-
-# 🔽 ここに予約用検索関数を追加
-
-def search_reserve_knowledge(user_q, k=3):
-    query_vector = get_embedding(user_q).astype("float32").reshape(1, -1)
-    scores, indices = reserve_index.search(query_vector, k)
-    hits = [reserve_corpus[i] for i in indices[0] if i < len(reserve_corpus)]
-    return hits
-
-# 🔽 ここに判定関数を追加
+# 分類は /chat と同じキーワードを一箇所で管理する。
 def is_reserve_query(user_q):
-    keywords = ["予約", "納期", "製造日", "納品", "アクセス", "ID", "パスワード", "ログイン"]
-    return any(kw in user_q for kw in keywords)
+    return any(kw in user_q.lower() for kw in ["予約", "ログイン", "マニュアル", "アカウント", "登録"])
 
-if os.path.exists(VECTOR_PATH) and os.path.exists(INDEX_PATH):
-    vector_data = np.load(VECTOR_PATH)
-    index = faiss.read_index(INDEX_PATH)
-else:
-    vector_data = np.array([get_embedding(text) for text in search_corpus], dtype="float32")
-    index = faiss.IndexFlatL2(vector_data.shape[1])
-    index.add(vector_data)
-    np.save(VECTOR_PATH, vector_data)
-    faiss.write_index(index, INDEX_PATH)
+
+def validate_search_index(vectors, search_index, corpus, label):
+    if (vectors.ndim != 2 or vectors.shape[0] != len(corpus)
+            or search_index.ntotal != len(corpus)
+            or vectors.shape[1] != search_index.d):
+        raise ValueError(f"{label}: corpus / vectors / FAISS の件数または次元が不一致です")
+
+
+validate_search_index(vector_data, index, search_corpus, "通常")
+validate_search_index(reserve_vector_data, reserve_index, reserve_search_corpus, "予約")
 
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 UNANSWERED_SHEET = "faq_suggestions_reserve"
@@ -236,12 +223,11 @@ def chat():
                 "expanded_question": user_q
             })
 
+        session_history = list(get_session_history(session_id))
         add_to_session_history(session_id, "user", user_q)
-        session_history = get_session_history(session_id)
 
         # === クエリの種類に応じてリライト関数を自動選択 + ベクトル検索対象を決定 ===
-        lower_q = user_q.lower()
-        if any(x in lower_q for x in ["予約", "ログイン", "マニュアル", "アカウント", "登録"]):
+        if is_reserve_query(user_q):
             expanded_q = expand_reserve_query(user_q, session_history)
             use_reserve = True
         else:
@@ -263,15 +249,12 @@ def chat():
             search_faq_answers = faq_answers
             search_knowledge_contents = knowledge_contents
 
-        D, I = index.search(np.array([q_vector]), k=7)
-        if I.shape[1] == 0:
-            raise ValueError("検索結果が見つかりませんでした")
 
         faq_context = []
         reference_context = []
 
         for idx in I[0]:
-            if idx >= len(search_source_flags):
+            if idx < 0 or idx >= len(search_source_flags):
                 continue
             src = search_source_flags[idx]
             if src == "faq":
@@ -283,8 +266,10 @@ def chat():
                 if ref_idx < len(search_knowledge_contents):
                     reference_context.append(f"【参考知識】{search_knowledge_contents[ref_idx]}")
 
-        film_match_data = pf_matcher.match(user_q, session_history)
-        film_info_text = pf_matcher.format_match_info(film_match_data)
+        film_info_text = ""
+        if not use_reserve:
+            film_match_data = pf_matcher.match(user_q, session_history)
+            film_info_text = pf_matcher.format_match_info(film_match_data)
         if film_info_text:
             reference_context.insert(0, film_info_text)
 
