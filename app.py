@@ -3,6 +3,8 @@ import os
 import json
 import time
 import base64
+import ipaddress
+import traceback
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -11,7 +13,9 @@ for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
     os.environ.pop(var, None)
 
 from flask import Flask, request, jsonify
+from werkzeug.exceptions import RequestEntityTooLarge
 from flask_cors import CORS
+from flask_limiter import Limiter
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from openai import OpenAI
@@ -31,7 +35,41 @@ RESERVE_INDEX_PATH = "data/reserve_index.faiss"
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+
+DEFAULT_ALLOWED_ORIGIN = "https://chatbot-re.psi-coffee.com"
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGIN).split(",")
+    if origin.strip()
+]
+if not allowed_origins:
+    allowed_origins = [DEFAULT_ALLOWED_ORIGIN]
+
+CORS(app, resources={
+    r"/chat": {"origins": allowed_origins},
+    r"/feedback": {"origins": allowed_origins},
+})
+
+
+def get_rate_limit_key():
+    # Renderの公開WebサービスではCloudflareがCF-Connecting-IPを上書きする。
+    # 呼び出し元が左端を偽装できるX-Forwarded-Forはレート制限に使用しない。
+    if os.getenv("RENDER", "").lower() == "true":
+        client_ip = request.headers.get("CF-Connecting-IP", "").strip()
+        try:
+            return str(ipaddress.ip_address(client_ip))
+        except ValueError:
+            pass
+    return request.remote_addr or "unknown"
+
+
+limiter = Limiter(
+    key_func=get_rate_limit_key,
+    app=app,
+    default_limits=[],
+    storage_uri="memory://",
+)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -204,15 +242,55 @@ def log_chat_history(user_q, answer, source_type, is_unanswered):
 
 GREETING_PATTERNS = ["こんにちは", "こんばんは", "おはよう", "はじめまして", "宜しくお願いします", "よろしくお願いします"]
 
+
+def parse_json_request():
+    if not request.is_json:
+        return None, (jsonify({"error": "JSON形式で送信してください。"}), 415)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "正しいJSON形式で送信してください。"}), 400)
+    return data, None
+
+
+def is_valid_session_id(session_id):
+    return (
+        isinstance(session_id, str)
+        and bool(session_id.strip())
+        and len(session_id) <= 128
+        and all(char.isprintable() for char in session_id)
+    )
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({"error": "送信データが大きすぎます。内容を短くして再度お試しください。"}), 413
+
+
+@app.errorhandler(429)
+def rate_limit_exceeded(_error):
+    return jsonify({"error": "リクエストが多すぎます。時間をおいて再度お試しください。"}), 429
+
 @app.route("/chat", methods=["POST"])
+@limiter.limit("10 per minute; 100 per hour")
 def chat():
     try:
-        data = request.get_json()
-        user_q = data.get("question", "").strip()
-        session_id = data.get("session_id", "default")
+        data, error_response = parse_json_request()
+        if error_response:
+            return error_response
+
+        question = data.get("question", "")
+        session_id = data.get("session_id")
+
+        if not isinstance(question, str):
+            return jsonify({"error": "質問は文字列で入力してください。"}), 400
+        user_q = question.strip()
 
         if not user_q:
             return jsonify({"error": "質問がありません"}), 400
+        if len(user_q) > 2000:
+            return jsonify({"error": "質問は2000文字以内で入力してください。"}), 400
+        if not is_valid_session_id(session_id):
+            return jsonify({"error": "有効なセッションIDを指定してください。"}), 400
 
         if any(greet in user_q for greet in GREETING_PATTERNS):
             reply = "こんにちは！ご質問があればお気軽にどうぞ。"
@@ -325,12 +403,16 @@ def chat():
         answer = completion.choices[0].message.content.strip()
 
         if "申し訳" in answer or "恐れ入りますが" in answer or "エラー" in answer:
-            sheet_service.values().append(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"{UNANSWERED_SHEET}!A2:D",
-                valueInputOption="RAW",
-                body={"values": [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_q, "未回答", 1]]}
-            ).execute()
+            try:
+                sheet_service.values().append(
+                    spreadsheetId=SPREADSHEET_ID,
+                    range=f"{UNANSWERED_SHEET}!A2:D",
+                    valueInputOption="RAW",
+                    body={"values": [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_q, "未回答", 1]]}
+                ).execute()
+            except Exception:
+                print("[ERROR writing unanswered log]")
+                traceback.print_exc()
 
         add_to_session_history(session_id, "assistant", answer)
 
@@ -349,30 +431,52 @@ def chat():
             "expanded_question": expanded_q
         })
 
-    except Exception as e:
-        print("[ERROR in /chat]:", e)
+    except RequestEntityTooLarge:
+        raise
+    except Exception:
+        print("[ERROR in /chat]")
+        traceback.print_exc()
         return jsonify({
-            "response": "エラーが発生しました。",
-            "error": str(e)
+            "response": "一時的なエラーが発生しました。時間をおいて再度お試しください。"
         }), 500
 
 @app.route("/feedback", methods=["POST"])
+@limiter.limit("20 per minute; 200 per hour")
 def feedback():
-    data = request.get_json()
+    data, error_response = parse_json_request()
+    if error_response:
+        return error_response
+
     question = data.get("question")
     answer = data.get("answer")
     feedback_value = data.get("feedback")
     reason = data.get("reason", "")
 
+    if not all(isinstance(value, str) for value in [question, answer, feedback_value, reason]):
+        return jsonify({"error": "フィードバック項目は文字列で送信してください。"}), 400
+
+    question = question.strip()
+    answer = answer.strip()
+    feedback_value = feedback_value.strip()
+    reason = reason.strip()
+
     if not all([question, answer, feedback_value]):
         return jsonify({"error": "不完全なフィードバックデータです"}), 400
+    if (len(question) > 2000 or len(answer) > 10000
+            or len(feedback_value) > 100 or len(reason) > 2000):
+        return jsonify({"error": "フィードバックの入力文字数が上限を超えています。"}), 400
 
-    sheet_service.values().append(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"{FEEDBACK_SHEET}!A2:E",
-        valueInputOption="RAW",
-        body={"values": [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), question, answer, feedback_value, reason]]}
-    ).execute()
+    try:
+        sheet_service.values().append(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{FEEDBACK_SHEET}!A2:E",
+            valueInputOption="RAW",
+            body={"values": [[datetime.now().strftime("%Y-%m-%d %H:%M:%S"), question, answer, feedback_value, reason]]}
+        ).execute()
+    except Exception:
+        print("[ERROR writing feedback]")
+        traceback.print_exc()
+        return jsonify({"error": "フィードバックを保存できませんでした。時間をおいて再度お試しください。"}), 503
 
     return jsonify({"status": "success"})
 

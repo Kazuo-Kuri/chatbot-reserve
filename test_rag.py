@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import time
+import traceback
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -14,7 +15,7 @@ import numpy as np
 
 def load_app_logic():
     source = Path('app.py').read_text(encoding='utf-8')
-    env = dict(os=os, json=json, np=np, faiss=faiss, time=time,
+    env = dict(os=os, json=json, np=np, faiss=faiss, time=time, traceback=traceback,
                client=Mock(), session_histories={}, HISTORY_TTL=1800,
                VECTOR_PATH='data/vector_data.npy', INDEX_PATH='data/index.faiss',
                RESERVE_VECTOR_PATH='data/reserve_vector_data.npy',
@@ -38,7 +39,9 @@ class RagTests(unittest.TestCase):
 
     def request(self, question, reserve, indices=None):
         e = self.e
-        e.update(request=SimpleNamespace(get_json=lambda: {'question': question, 'session_id': 'test'}),
+        e.update(request=SimpleNamespace(
+                     is_json=True,
+                     get_json=lambda **_kwargs: {'question': question, 'session_id': 'test'}),
                  jsonify=lambda x: x, GREETING_PATTERNS=[], base_prompt='SYSTEM',
                  expand_query=Mock(return_value='normal expanded'),
                  expand_reserve_query=Mock(return_value='reserve expanded'),
