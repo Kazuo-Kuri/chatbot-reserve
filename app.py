@@ -1360,7 +1360,7 @@ def chat():
 
         completion = (
             client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-5.6-sol",
                 messages=[
                     {
                         "role":
