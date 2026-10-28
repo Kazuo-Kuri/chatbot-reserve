@@ -85,8 +85,8 @@ class ProductFilmMatcher:
             return "" if not fallback else "【製品フィルム・カラー情報】確認できませんでした。"
         if info.get("type") == "matrix_combinations":
             if not info.get("matched"):
-                return "【製品フィルム・カラー情報】" + info.get("message", "一致する組み合わせがありません。") if fallback else ""
-            lines = ["【製品フィルム・カラー情報：登録対応表に基づく確定情報】"]
+                return info.get("message", "一致する組み合わせがありません。") if fallback else ""
+            lines = []
             grouped = {}
             for row in info["rows"]:
                 grouped.setdefault(row["product"], []).append(row)
@@ -94,7 +94,6 @@ class ProductFilmMatcher:
                 lines.append(f"■ {product}")
                 for row in rows:
                     lines.append(f"- {row['film']}：{', '.join(row['colors'])}")
-            lines.append("※上記は登録済みのアフタープリント単色印刷の対応表に基づきます。")
             return "\n".join(lines)
         if not info.get("matched"):
             return ("【製品フィルム・カラー情報】" + info.get("message", "該当情報がありません。")) if fallback else ""
