@@ -1,196 +1,112 @@
+"""外装素材×製品種×単色印刷色の登録マトリクスに基づく確定照合。"""
 import json
 from keyword_filter import extract_keywords
+
 
 class ProductFilmMatcher:
     def __init__(self, json_path="data/product_film_color_matrix.json"):
         with open(json_path, "r", encoding="utf-8") as f:
             self.data = json.load(f)
 
+    def _products(self, name):
+        if not name:
+            return list(self.data)
+        return [p for p in self.data if p == name or name in p]
+
+    def _films(self, product, name):
+        if not name:
+            return list(self.data[product])
+        return [f for f in self.data[product] if f == name or name in f]
+
     def get_films_for_product(self, product_name):
-        product = next((p for p in self.data if p in product_name), None)
-        if not product:
+        products = self._products(product_name)
+        if not products:
             return {"matched": False, "type": "product_to_films", "message": "該当する製品種が見つかりませんでした。"}
-        films = list(self.data[product].keys())
-        return {
-            "matched": True,
-            "type": "product_to_films",
-            "product": product,
-            "films": films
-        }
+        p = products[0]
+        return {"matched": True, "type": "product_to_films", "product": p, "films": self._films(p, None)}
 
     def get_colors_for_film_in_product(self, product_name, film_name):
-        for product, films in self.data.items():
-            if product_name in product:
-                for film, colors in films.items():
-                    if film_name in film:
-                        return {
-                            "matched": True,
-                            "type": "product_film_to_colors",
-                            "product": product,
-                            "film": film,
-                            "colors": colors
-                        }
-        return {"matched": False, "type": "product_film_to_colors", "message": "該当する製品とフィルムの組み合わせが見つかりませんでした。"}
+        for p in self._products(product_name):
+            for f in self._films(p, film_name):
+                return {"matched": True, "type": "product_film_to_colors", "product": p,
+                        "film": f, "colors": self.data[p][f]}
+        return {"matched": False, "type": "product_film_to_colors", "message": "該当する製品と外装素材の組み合わせが見つかりませんでした。"}
 
     def get_products_for_film(self, film_name):
-        matched_products = []
-        for product, films in self.data.items():
-            if any(film_name in film for film in films):
-                matched_products.append(product)
-        if matched_products:
-            return {
-                "matched": True,
-                "type": "film_to_products",
-                "film": film_name,
-                "products": matched_products
-            }
-        return {"matched": False, "type": "film_to_products", "message": "該当するフィルムに対応する製品が見つかりませんでした。"}
+        products = [p for p in self.data if self._films(p, film_name)]
+        return {"matched": bool(products), "type": "film_to_products", "film": film_name, "products": products}
 
     def get_films_for_color(self, color_names):
-        matched = set()
-        for product, films in self.data.items():
-            for film, colors in films.items():
-                if any(c in colors for c in color_names):
-                    matched.add(film)
-        if matched:
-            return {
-                "matched": True,
-                "type": "color_to_films",
-                "color": ", ".join(color_names),
-                "films": list(matched)
-            }
-        return {"matched": False, "type": "color_to_films", "message": "該当する印刷色が見つかりませんでした。"}
+        films = list(dict.fromkeys(f for p, ff in self.data.items() for f, cc in ff.items()
+                                   if any(c in cc for c in color_names)))
+        return {"matched": bool(films), "type": "color_to_films", "color": ", ".join(color_names), "films": films}
 
     def get_products_for_color(self, color_names):
-        matched_products = set()
-        for product, films in self.data.items():
-            for colors in films.values():
-                if any(c in colors for c in color_names):
-                    matched_products.add(product)
-        if matched_products:
-            return {
-                "matched": True,
-                "type": "color_to_products",
-                "color": ", ".join(color_names),
-                "products": list(matched_products)
-            }
-        return {"matched": False, "type": "color_to_products", "message": "該当する印刷色に対応する製品が見つかりませんでした。"}
+        products = [p for p, ff in self.data.items() if any(any(c in cc for c in color_names) for cc in ff.values())]
+        return {"matched": bool(products), "type": "color_to_products", "color": ", ".join(color_names), "products": products}
 
     def get_film_colors_for_color(self, color_names):
-        matched_colors = set()
-        for product, films in self.data.items():
-            for film, colors in films.items():
-                if any(c in colors for c in color_names):
-                    matched_colors.add(film)
-        if matched_colors:
-            return {
-                "matched": True,
-                "type": "color_to_film_colors",
-                "color": ", ".join(color_names),
-                "film_colors": list(matched_colors)
-            }
-        return {"matched": False, "type": "color_to_film_colors", "message": "印刷色に対応するフィルム色が見つかりませんでした。"}
+        res = self.get_films_for_color(color_names)
+        return {"matched": res["matched"], "type": "color_to_film_colors", "color": res["color"], "film_colors": res["films"]}
 
     def match(self, user_input, history=None):
+        """登録済み組み合わせをすべて列挙。未指定の軸は全候補を検索。"""
         try:
-            keywords = extract_keywords(user_input)
-            print("🔍 extract_keywords:", keywords)
+            words = extract_keywords(user_input)
+            products, films, colors = (words[k] for k in ("product", "film", "color"))
+            text = str(user_input or "")
+            # 製品名だけ含む納期・ロット等の質問をマトリクス回答で妨げない。
+            material_intent = any(w in text for w in ("印刷", "色", "フィルム", "包材", "外装", "素材", "ゴールド", "シルバー", "クラフト", "ハイバリア", "使える", "対応可能"))
+            if not (films or colors or (products and material_intent)):
+                return {"matched": False, "type": "no_match", "message": "製品仕様照合の対象外です。"}
+            if not (products or films or colors):
+                return {"matched": False, "type": "no_match", "message": "製品・外装素材・印刷色を特定できませんでした。"}
+            rows = []
+            for p in self.data:
+                if products and p not in self._matching_product_names(products):
+                    continue
+                for f, available in self.data[p].items():
+                    if films and not any(name in f for name in films):
+                        continue
+                    matching_colors = [c for c in available if not colors or c in colors]
+                    if matching_colors:
+                        rows.append({"product": p, "film": f, "colors": matching_colors})
+            return {"matched": bool(rows), "type": "matrix_combinations", "rows": rows,
+                    "requested": words, "message": "登録された対応表には、指定条件に一致する組み合わせがありません。"}
+        except Exception as exc:
+            print("ProductFilmMatcher error:", exc)
+            return {"matched": False, "type": "error", "message": "製品仕様照合中にエラーが発生しました。"}
 
-            if not isinstance(keywords, dict):
-                return {"matched": False, "type": "no_match", "message": "キーワード抽出でエラーが発生しました。"}
-
-            products = keywords.get("product") or []
-            films = keywords.get("film") or []
-            colors = keywords.get("color") or []
-
-            if not isinstance(products, list): products = []
-            if not isinstance(films, list): films = []
-            if not isinstance(colors, list): colors = []
-
-            if products and films and colors:
-                for p in products:
-                    for f in films:
-                        info = self.get_colors_for_film_in_product(p, f)
-                        if info["matched"] and any(c in info.get("colors", []) for c in colors):
-                            print(f"✅ match type: {info['type']}")
-                            return info
-
-            if products and films:
-                for p in products:
-                    for f in films:
-                        info = self.get_colors_for_film_in_product(p, f)
-                        if info["matched"]:
-                            print(f"✅ match type: {info['type']}")
-                            return info
-
-            if products:
-                for p in products:
-                    result = self.get_films_for_product(p)
-                    if result["matched"]:
-                        print(f"✅ match type: {result['type']}")
-                        return result
-
-            if films:
-                for f in films:
-                    result = self.get_products_for_film(f)
-                    if result["matched"]:
-                        print(f"✅ match type: {result['type']}")
-                        return result
-
-            if colors:
-                for getter in [
-                    self.get_products_for_color,
-                    self.get_film_colors_for_color,
-                    self.get_films_for_color
-                ]:
-                    result = getter(colors)
-                    if result["matched"]:
-                        print(f"✅ match type: {result['type']}")
-                        return result
-
-            print("⚠️ No match found")
-            return {"matched": False, "type": "no_match", "message": "製品・フィルム・色のいずれも該当する情報が見つかりませんでした。"}
-
-        except Exception as e:
-            print("❌ match error:", e)
-            return {"matched": False, "type": "error", "message": f"マッチ処理中にエラーが発生しました：{str(e)}"}
+    def _matching_product_names(self, names):
+        return {p for name in names for p in self._products(name)}
 
     def format_match_info(self, info, fallback=False):
         if not isinstance(info, dict):
-            return "【製品フィルム・カラー情報】製品・フィルム・印刷色に関する情報が見つかりませんでした。"
-
-        if not info.get("matched", False):
-            if fallback:
-                return f"【製品フィルム・カラー情報】{info.get('message', '該当情報が見つかりませんでした。')}（必要に応じてお問い合わせフォームよりご連絡ください）"
-            else:
-                return ""
-
-        match_type = info.get("type")
-        lines = ["【製品フィルム・カラー情報】"]
-
-        if match_type == "product_to_films":
-            lines.append(f"- 製品「{info['product']}」で選択可能なフィルム：")
-            lines.append(f"- {', '.join(info['films'])}")
-
-        elif match_type == "product_film_to_colors":
-            lines.append(f"- 「{info['product']} × {info['film']}」で使用可能な印刷色：")
-            lines.append(f"- {', '.join(info['colors'])}")
-
-        elif match_type == "film_to_products":
-            lines.append(f"- フィルム「{info['film']}」が使用できる製品：")
-            lines.append(f"- {', '.join(info['products'])}")
-
-        elif match_type == "color_to_films":
-            lines.append(f"- 印刷色「{info['color']}」に対応可能なフィルム：")
-            lines.append(f"- {', '.join(info['films'])}")
-
-        elif match_type == "color_to_products":
-            lines.append(f"- 印刷色「{info['color']}」に対応可能な製品：")
-            lines.append(f"- {', '.join(info['products'])}")
-            lines.append(f"これらの製品では、{info['color']}の印刷色を選択することが可能です。")
-
-        elif match_type == "color_to_film_colors":
-            lines.append(f"- 印刷色「{info['color']}」に対応可能なフィルム（製品問わず）：")
-            lines.append(f"- {', '.join(info['film_colors'])}")
-
-        return "\n".join(lines)
+            return "" if not fallback else "【製品フィルム・カラー情報】確認できませんでした。"
+        if info.get("type") == "matrix_combinations":
+            if not info.get("matched"):
+                return "【製品フィルム・カラー情報】" + info.get("message", "一致する組み合わせがありません。") if fallback else ""
+            lines = ["【製品フィルム・カラー情報：登録対応表に基づく確定情報】"]
+            grouped = {}
+            for row in info["rows"]:
+                grouped.setdefault(row["product"], []).append(row)
+            for product, rows in grouped.items():
+                lines.append(f"■ {product}")
+                for row in rows:
+                    lines.append(f"- {row['film']}：{', '.join(row['colors'])}")
+            lines.append("※上記は登録済みのアフタープリント単色印刷の対応表に基づきます。")
+            return "\n".join(lines)
+        if not info.get("matched"):
+            return ("【製品フィルム・カラー情報】" + info.get("message", "該当情報がありません。")) if fallback else ""
+        kind = info.get("type")
+        if kind == "product_to_films":
+            return f"【製品フィルム・カラー情報】{info['product']}：{', '.join(info['films'])}"
+        if kind == "product_film_to_colors":
+            return f"【製品フィルム・カラー情報】{info['product']} × {info['film']}：{', '.join(info['colors'])}"
+        if kind == "film_to_products":
+            return f"【製品フィルム・カラー情報】{info['film']}：{', '.join(info['products'])}"
+        if kind == "color_to_products":
+            return f"【製品フィルム・カラー情報】{info['color']}：{', '.join(info['products'])}"
+        if kind in ("color_to_films", "color_to_film_colors"):
+            return f"【製品フィルム・カラー情報】{info['color']}：{', '.join(info.get('films', info.get('film_colors', [])))}"
+        return ""

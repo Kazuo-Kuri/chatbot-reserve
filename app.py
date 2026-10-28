@@ -1203,33 +1203,33 @@ def chat():
                 )
 
         # ----------------------------------------------------
-        # Film Matcher
-        #
-        # 従来どおり通常チャットのみ
+        # Film Matcher: 通常チャット／予約チャット共通
+        # 登録済みの製品×外装素材×印刷色は決定的に回答する。
         # ----------------------------------------------------
 
-        film_info_text = ""
+        film_match_data = pf_matcher.match(user_q, session_history)
+        film_info_text = pf_matcher.format_match_info(film_match_data)
 
-        if not use_reserve:
-            film_match_data = (
-                pf_matcher.match(
-                    user_q,
-                    session_history,
+        if film_match_data.get("type") == "matrix_combinations":
+            # 製品・素材・印刷色の問い合わせはAIによる推測を避け、
+            # 対応表の情報をそのまま返す。
+            if film_match_data.get("matched"):
+                answer = film_info_text
+            else:
+                answer = pf_matcher.format_match_info(
+                    film_match_data, fallback=True
                 )
-            )
 
-            film_info_text = (
-                pf_matcher
-                .format_match_info(
-                    film_match_data
-                )
-            )
+            add_to_session_history(session_id, "assistant", answer)
+            log_chat_history(user_q, answer, "product_film_matrix", False)
+            return jsonify({
+                "response": answer,
+                "original_question": user_q,
+                "expanded_question": expanded_q,
+            })
 
         if film_info_text:
-            reference_context.insert(
-                0,
-                film_info_text,
-            )
+            reference_context.insert(0, film_info_text)
 
         # ----------------------------------------------------
         # Metadata
