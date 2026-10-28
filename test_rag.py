@@ -67,7 +67,8 @@ class RagTests(unittest.TestCase):
         e['index' if reserve else 'reserve_index'].search.assert_not_called()
         e['expand_reserve_query' if reserve else 'expand_query'].assert_called_once_with(question, [])
         call = e['client'].chat.completions.create.call_args.kwargs
-        self.assertEqual(call['model'], 'gpt-4o')
+        self.assertEqual(call['model'], 'gpt-5.6-sol')
+        self.assertNotIn('temperature', call)
         prompt = call['messages'][1]['content']
         prefix = 'reserve_' if reserve else ''
         self.assertIn('Q: ' + e[prefix+'faq_questions'][0], prompt)
