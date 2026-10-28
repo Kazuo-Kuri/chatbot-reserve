@@ -43,8 +43,7 @@ def expand_query(user_input, session_history):
         response = openai.chat.completions.create(
             model="gpt-5.6-luna",
             messages=cast(Any, prompt),
-            temperature=0.3,
-            max_tokens=100,
+            max_completion_tokens=512,
         )
 
         return (
