@@ -1375,7 +1375,6 @@ def chat():
                         prompt,
                     },
                 ],
-                temperature=0.2,
             )
         )
 
